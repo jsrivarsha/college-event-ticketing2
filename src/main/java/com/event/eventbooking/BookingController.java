@@ -1,5 +1,4 @@
 package com.event.eventbooking;
-
 import java.util.Optional;
 import java.util.UUID;
 
@@ -8,7 +7,6 @@ import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
-
 @Controller
 public class BookingController {
 
@@ -26,13 +24,11 @@ public class BookingController {
         this.qrCodeService = qrCodeService;
         this.emailService = emailService;
     }
-
     @GetMapping("/")
     public String showBookingPage(Model model) {
         model.addAttribute("events", eventRepository.findAll());
         return "index";
     }
-
     @PostMapping("/book")
     public String handleBooking(@RequestParam String studentName,
                                 @RequestParam String email,
@@ -79,8 +75,12 @@ public class BookingController {
         String qrData = "Token: " + tokenId + "\nEvent: " + eventName + "\nStudent: " + studentName + " (" + registerNo + ")";
         String qrBase64 = qrCodeService.generateQRCodeBase64(qrData, 250, 250);
 
-        // Send confirmation email to attendee
-        emailService.sendTicketEmail(booking, qrBase64);
+        // Send confirmation email safely
+try {
+    emailService.sendTicketEmail(booking, qrBase64);
+} catch (Exception e) {
+    System.err.println("Failed to send ticket email: " + e.getMessage());
+}
 
         model.addAttribute("booking", booking);
         model.addAttribute("qrBase64", qrBase64);
