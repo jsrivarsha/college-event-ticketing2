@@ -1,60 +1,73 @@
 package com.event.eventbooking;
 
-import java.util.Base64;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 
-import org.springframework.core.io.ByteArrayResource;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.mail.javamail.MimeMessageHelper;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-
-import jakarta.mail.MessagingException;
-import jakarta.mail.internet.MimeMessage;
 
 @Service
 public class EmailService {
 
-    private final JavaMailSender mailSender;
+    @Value("${BREVO_API_KEY:}")
+    private String apiKey;
 
-    public EmailService(JavaMailSender mailSender) {
-        this.mailSender = mailSender;
-    }
+    @Value("${SENDER_EMAIL:janjam.srivarsha2@gmail.com}")
+    private String senderEmail;
 
     public void sendTicketEmail(Booking booking, String qrBase64) {
+        if (apiKey == null || apiKey.isBlank()) {
+            System.err.println("BREVO_API_KEY is not set. Skipping email.");
+            return;
+        }
+
         try {
-            MimeMessage message = mailSender.createMimeMessage();
-            MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
+            String base64Data = qrBase64.contains(",") ? qrBase64.split(",")[1] : qrBase64;
 
-            // Dynamically sends to whoever filled the form:
-            helper.setTo(booking.getEmail());
-            helper.setSubject("🎟 Ticket Confirmation: " + booking.getEventName());
+            String jsonPayload = """
+            {
+              "sender": {"name": "College Events", "email": "%s"},
+              "to": [{"email": "%s", "name": "%s"}],
+              "subject": "Your Event Ticket - %s",
+              "htmlContent": "<p>Hello <b>%s</b>,</p><p>Your registration for <b>%s</b> is confirmed!</p><p>Ticket ID: <b>%s</b></p><p>Please find your QR code attached below.</p>",
+              "attachment": [
+                {
+                  "name": "ticket-qr.png",
+                  "content": "%s"
+                }
+              ]
+            }
+            """.formatted(
+                    senderEmail,
+                    booking.getEmail(),
+                    booking.getStudentName(),
+                    booking.getEventName(),
+                    booking.getStudentName(),
+                    booking.getEventName(),
+                    booking.getTokenId(),
+                    base64Data
+            );
 
-            String htmlContent = """
-                <div style="font-family: Arial, sans-serif; max-width: 500px; margin: auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px;">
-                    <h2 style="color: #2563eb; text-align: center; margin-bottom: 4px;">%s</h2>
-                    <p style="text-align: center; color: #64748b; margin-top: 0; font-size: 13px; font-weight: bold;">ADMISSION PASS</p>
-                    <hr style="border: none; border-top: 1px dashed #cbd5e1; margin: 15px 0;">
-                    <p><strong>Attendee:</strong> %s</p>
-                    <p><strong>Register No:</strong> %s</p>
-                    <p><strong>Phone:</strong> %s</p>
-                    <p><strong>Token ID:</strong> <span style="font-family: monospace; color: #2563eb; font-weight: bold;">%s</span></p>
-                    <hr style="border: none; border-top: 1px dashed #cbd5e1; margin: 15px 0;">
-                    <div style="text-align: center; margin-top: 15px;">
-                        <p style="font-size: 13px; color: #64748b;">Show this QR pass at the entrance gate:</p>
-                        <img src="cid:qrCodeImage" style="width: 220px; height: 220px; border-radius: 8px; border: 1px solid #eee;" alt="Ticket QR Code"/>
-                    </div>
-                </div>
-                """.formatted(booking.getEventName(), booking.getStudentName(), booking.getRegisterNo(), booking.getPhoneNumber(), booking.getTokenId());
+            HttpClient client = HttpClient.newHttpClient();
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create("https://api.brevo.com/v3/smtp/email"))
+                    .header("api-key", apiKey)
+                    .header("Content-Type", "application/json")
+                    .header("Accept", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
+                    .build();
 
-            helper.setText(htmlContent, true);
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
-            // Attach QR Code as an inline image
-            byte[] imageBytes = Base64.getDecoder().decode(qrBase64);
-            helper.addInline("qrCodeImage", new ByteArrayResource(imageBytes), "image/png");
-
-            mailSender.send(message);
-            System.out.println(">>> Ticket email successfully sent to: " + booking.getEmail() + " <<<");
-        } catch (MessagingException e) {
-            System.err.println("Failed to send email to " + booking.getEmail() + ": " + e.getMessage());
+            if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                System.out.println("Email sent successfully via Brevo API: " + response.body());
+            } else {
+                System.err.println("Brevo API error: " + response.statusCode() + " - " + response.body());
+            }
+        } catch (Exception e) {
+            System.err.println("Failed to send email via API: " + e.getMessage());
         }
     }
 }
